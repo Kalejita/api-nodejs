@@ -1,4 +1,5 @@
 const Contacto = require('../models/Contacto');
+const { contactoCreado, contactoActualizado, contactoEliminado } = require('../services/eventEmitter');
 
 // Obtener todos los contactos
 const obtenerContactos = async (req, res) => {
@@ -28,6 +29,10 @@ const crearContacto = async (req, res) => {
   try {
     const contacto = new Contacto(req.body);
     const contactoGuardado = await contacto.save();
+
+    // Emitir evento a Redis
+    await contactoCreado(contactoGuardado.toObject());
+
     res.status(201).json(contactoGuardado);
   } catch (error) {
     if (error.code === 11000) {
@@ -48,6 +53,10 @@ const actualizarContacto = async (req, res) => {
     if (!contacto) {
       return res.status(404).json({ mensaje: 'Contacto no encontrado' });
     }
+
+    // Emitir evento a Redis
+    await contactoActualizado(contacto.toObject());
+
     res.json(contacto);
   } catch (error) {
     if (error.code === 11000) {
@@ -64,6 +73,10 @@ const eliminarContacto = async (req, res) => {
     if (!contacto) {
       return res.status(404).json({ mensaje: 'Contacto no encontrado' });
     }
+
+    // Emitir evento a Redis
+    await contactoEliminado(req.params.id);
+
     res.json({ mensaje: 'Contacto eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al eliminar contacto', error: error.message });

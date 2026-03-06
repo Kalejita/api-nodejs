@@ -1,11 +1,19 @@
 # API de Gestión de Contactos
 
-API REST sencilla para gestionar contactos, construida con Node.js, Express y MongoDB.
+API REST con actualizaciones en tiempo real para gestionar contactos, construida con Node.js, Express, MongoDB, Redis y WebSockets.
+
+## Características
+
+- CRUD completo de contactos
+- Actualizaciones en tiempo real via WebSockets
+- Arquitectura Pub/Sub con Redis
+- Frontend incluido que se actualiza automáticamente
 
 ## Requisitos previos
 
 - [Node.js](https://nodejs.org/) (v18 o superior)
-- [MongoDB](https://www.mongodb.com/) corriendo localmente o una URI de MongoDB Atlas
+- [MongoDB](https://www.mongodb.com/) corriendo localmente o en Docker
+- [Redis](https://redis.io/) corriendo localmente o en Docker
 
 ## Instalación
 
@@ -18,46 +26,115 @@ API REST sencilla para gestionar contactos, construida con Node.js, Express y Mo
 
 3. Configura las variables de entorno:
 
-   Crea un archivo `.env` en la raíz del proyecto (o edita el existente):
+   Crea un archivo `.env` en la raíz del proyecto:
    ```
    PORT=3000
    MONGO_URI=mongodb://localhost:27017/contactos_db
+
+   # Redis Configuration
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   REDIS_PASSWORD=
    ```
 
 ## Ejecución
 
-**Modo desarrollo** (con reinicio automático):
-```bash
-npm run dev
-```
+1. Asegúrate de que MongoDB y Redis estén corriendo:
+   ```bash
+   # Si usas Docker
+   docker run -d -p 27017:27017 --name mongodb mongo
+   docker run -d -p 6379:6379 --name redis redis
+   ```
 
-**Modo producción**:
-```bash
-npm start
-```
+2. Inicia la aplicación:
 
-El servidor estará disponible en `http://localhost:3000`
+   **Modo desarrollo** (con reinicio automático):
+   ```bash
+   npm run dev
+   ```
+
+   **Modo producción**:
+   ```bash
+   npm start
+   ```
+
+3. Accede a:
+   - **Frontend**: http://localhost:3000
+   - **API**: http://localhost:3000/api/contactos
 
 ## Estructura del proyecto
 
 ```
 api-node/
 ├── src/
+│   ├── index.js                    # Punto de entrada
 │   ├── config/
-│   │   └── db.js              # Configuración de conexión a MongoDB
+│   │   ├── db.js                   # Conexión MongoDB
+│   │   └── redis.js                # Conexión Redis (publisher/subscriber)
 │   ├── controllers/
-│   │   └── contactoController.js  # Lógica de negocio
+│   │   └── contactoController.js   # Lógica CRUD + emisión de eventos
 │   ├── models/
-│   │   └── Contacto.js        # Esquema de Mongoose
+│   │   └── Contacto.js             # Esquema Mongoose
 │   ├── routes/
-│   │   └── contactoRoutes.js  # Definición de rutas
-│   └── index.js               # Punto de entrada de la aplicación
-├── .env                       # Variables de entorno (no incluir en git)
-├── .env.example               # Ejemplo de variables de entorno
+│   │   └── contactoRoutes.js       # Definición de rutas REST
+│   ├── services/
+│   │   └── eventEmitter.js         # Publicador de eventos a Redis
+│   └── websocket/
+│       └── socketHandler.js        # Socket.io + suscripción Redis
+├── public/
+│   └── index.html                  # Frontend en tiempo real
+├── .env                            # Variables de entorno
+├── .env.example                    # Ejemplo de variables
 ├── .gitignore
 ├── package.json
 └── README.md
 ```
+
+## Arquitectura de tiempo real
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Postman   │────▶│  Express    │────▶│   MongoDB   │
+│   (CRUD)    │     │  API REST   │     │             │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                           │
+                           │ Publica evento
+                           ▼
+                    ┌─────────────┐
+                    │    Redis    │
+                    │  (Pub/Sub)  │
+                    └──────┬──────┘
+                           │
+                           │ Suscribe
+                           ▼
+                    ┌─────────────┐
+                    │  Socket.io  │
+                    │ (WebSocket) │
+                    └──────┬──────┘
+                           │
+                           │ Emite evento
+                           ▼
+                    ┌─────────────┐
+                    │  Frontend   │
+                    │   (HTML)    │
+                    └─────────────┘
+```
+
+## Flujo de eventos
+
+1. Usuario hace POST/PUT/DELETE desde Postman
+2. Controlador guarda en MongoDB
+3. Controlador publica evento a Redis (`contactos:eventos`)
+4. Socket handler escucha Redis y emite a clientes WebSocket
+5. Frontend recibe evento y actualiza la UI automáticamente
+
+## Eventos en tiempo real
+
+| Evento | Descripción |
+|--------|-------------|
+| `CONTACTO_CREADO` | Se creó un nuevo contacto |
+| `CONTACTO_ACTUALIZADO` | Se actualizó un contacto |
+| `CONTACTO_ELIMINADO` | Se eliminó un contacto |
 
 ## Endpoints de la API
 
@@ -77,8 +154,6 @@ http://localhost:3000/api/contactos
 | DELETE | `/api/contactos/:id` | Eliminar un contacto |
 
 ## Modelo de datos
-
-Cada contacto tiene los siguientes campos:
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
@@ -100,19 +175,8 @@ curl -X POST http://localhost:3000/api/contactos \
     "nombre": "María García",
     "email": "maria@ejemplo.com",
     "telefono": "555-1234",
-    "empresa": "Tech Corp",
-    "notas": "Cliente VIP"
+    "empresa": "Tech Corp"
   }'
-```
-
-### Obtener todos los contactos
-```bash
-curl http://localhost:3000/api/contactos
-```
-
-### Obtener un contacto por ID
-```bash
-curl http://localhost:3000/api/contactos/ID_DEL_CONTACTO
 ```
 
 ### Actualizar un contacto
@@ -120,7 +184,7 @@ curl http://localhost:3000/api/contactos/ID_DEL_CONTACTO
 curl -X PUT http://localhost:3000/api/contactos/ID_DEL_CONTACTO \
   -H "Content-Type: application/json" \
   -d '{
-    "telefono": "555-9999"
+    "nombre": "María García Actualizada"
   }'
 ```
 
@@ -129,28 +193,14 @@ curl -X PUT http://localhost:3000/api/contactos/ID_DEL_CONTACTO \
 curl -X DELETE http://localhost:3000/api/contactos/ID_DEL_CONTACTO
 ```
 
-## Respuestas de la API
+## Archivos clave
 
-### Respuesta exitosa (crear contacto)
-```json
-{
-  "_id": "64f1a2b3c4d5e6f7g8h9i0j1",
-  "nombre": "María García",
-  "email": "maria@ejemplo.com",
-  "telefono": "555-1234",
-  "empresa": "Tech Corp",
-  "notas": "Cliente VIP",
-  "createdAt": "2024-01-15T10:30:00.000Z",
-  "updatedAt": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### Respuesta de error
-```json
-{
-  "mensaje": "El email ya está registrado"
-}
-```
+| Archivo | Descripción |
+|---------|-------------|
+| `src/controllers/contactoController.js` | CRUD + emisión de eventos a Redis |
+| `src/websocket/socketHandler.js` | Puente entre Redis y clientes WebSocket |
+| `src/services/eventEmitter.js` | Publica eventos al canal Redis |
+| `public/index.html` | Frontend que escucha y renderiza en tiempo real |
 
 ## Códigos de estado HTTP
 
@@ -167,6 +217,8 @@ curl -X DELETE http://localhost:3000/api/contactos/ID_DEL_CONTACTO
 - **Node.js** - Entorno de ejecución
 - **Express.js** - Framework web
 - **Mongoose** - ODM para MongoDB
+- **Socket.io** - WebSockets en tiempo real
+- **ioredis** - Cliente Redis para Pub/Sub
 - **dotenv** - Manejo de variables de entorno
 - **cors** - Middleware para habilitar CORS
 

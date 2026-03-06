@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contactos en Tiempo Real</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    body {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      color: #333;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 10px;
+    }
+
+    .status {
+      padding: 10px 15px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
+
+    .status.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .contacto-card {
+      background: white;
+      border-radius: 8px;
+      padding: 15px 20px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      transition: all 0.3s ease;
+    }
+
+    .contacto-card.nuevo {
+      animation: highlight 2s ease;
+    }
+
+    .contacto-card.actualizado {
+      animation: highlightUpdate 2s ease;
+    }
+
+    @keyframes highlight {
+      0% { background: #d4edda; transform: scale(1.02); }
+      100% { background: white; transform: scale(1); }
+    }
+
+    @keyframes highlightUpdate {
+      0% { background: #fff3cd; transform: scale(1.02); }
+      100% { background: white; transform: scale(1); }
+    }
+
+    .contacto-card h3 {
+      margin: 0 0 5px 0;
+      color: #333;
+    }
+
+    .contacto-card p {
+      margin: 3px 0;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .contacto-card .email {
+      color: #007bff;
+    }
+
+    .contacto-card .meta {
+      font-size: 12px;
+      color: #999;
+      margin-top: 10px;
+    }
+
+    .eventos-log {
+      background: #1e1e1e;
+      color: #0f0;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+
+    .eventos-log .evento {
+      margin: 5px 0;
+    }
+
+    .eventos-log .evento.crear { color: #4caf50; }
+    .eventos-log .evento.actualizar { color: #ff9800; }
+    .eventos-log .evento.eliminar { color: #f44336; }
+
+    #loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+  </style>
+</head>
+<body>
+  <h1>Contactos en Tiempo Real</h1>
+
+  <div id="status" class="status disconnected">
+    Desconectado del servidor
+  </div>
+
+  <div id="contactos-container">
+    <div id="loading">Cargando contactos...</div>
+  </div>
+
+  <h3>Log de Eventos</h3>
+  <div id="eventos-log" class="eventos-log">
+    <div class="evento">Esperando eventos...</div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script>
+    let contactos = [];
+
+    const statusEl = document.getElementById('status');
+    const containerEl = document.getElementById('contactos-container');
+    const logEl = document.getElementById('eventos-log');
+
+    const socket = io();
+
+    socket.on('connect', () => {
+      console.log('Conectado al servidor WebSocket');
+      statusEl.textContent = 'Conectado al servidor';
+      statusEl.className = 'status connected';
+      cargarContactos();
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Desconectado del servidor');
+      statusEl.textContent = 'Desconectado del servidor';
+      statusEl.className = 'status disconnected';
+    });
+
+    socket.on('contacto:evento', (evento) => {
+      console.log('Evento recibido:', evento);
+
+      switch (evento.tipo) {
+        case 'CONTACTO_CREADO':
+          agregarContacto(evento.datos);
+          agregarLog('crear', `Nuevo contacto: ${evento.datos.nombre}`);
+          break;
+
+        case 'CONTACTO_ACTUALIZADO':
+          actualizarContacto(evento.datos);
+          agregarLog('actualizar', `Contacto actualizado: ${evento.datos.nombre}`);
+          break;
+
+        case 'CONTACTO_ELIMINADO':
+          eliminarContacto(evento.datos._id);
+          agregarLog('eliminar', `Contacto eliminado: ${evento.datos._id}`);
+          break;
+      }
+    });
+
+    async function cargarContactos() {
+      try {
+        const response = await fetch('/api/contactos');
+        contactos = await response.json();
+        renderizarContactos();
+      } catch (error) {
+        console.error('Error al cargar contactos:', error);
+        containerEl.innerHTML = '<div class="empty-state">Error al cargar contactos</div>';
+      }
+    }
+
+    function renderizarContactos() {
+      if (contactos.length === 0) {
+        containerEl.innerHTML = '<div class="empty-state">No hay contactos registrados</div>';
+        return;
+      }
+
+      containerEl.innerHTML = contactos.map(c => crearCardHTML(c)).join('');
+    }
+
+    function crearCardHTML(contacto, clase = '') {
+      return `
+        <div class="contacto-card ${clase}" id="contacto-${contacto._id}">
+          <h3>${contacto.nombre}</h3>
+          <p class="email">${contacto.email}</p>
+          ${contacto.telefono ? `<p>Tel: ${contacto.telefono}</p>` : ''}
+          ${contacto.empresa ? `<p>Empresa: ${contacto.empresa}</p>` : ''}
+          ${contacto.notas ? `<p>Notas: ${contacto.notas}</p>` : ''}
+          <p class="meta">ID: ${contacto._id}</p>
+        </div>
+      `;
+    }
+
+    function agregarContacto(contacto) {
+      contactos.unshift(contacto);
+
+      if (contactos.length === 1) {
+        containerEl.innerHTML = '';
+      }
+
+      containerEl.insertAdjacentHTML('afterbegin', crearCardHTML(contacto, 'nuevo'));
+    }
+
+    function actualizarContacto(contactoActualizado) {
+      const index = contactos.findIndex(c => c._id === contactoActualizado._id);
+      if (index !== -1) {
+        contactos[index] = contactoActualizado;
+
+        const cardEl = document.getElementById(`contacto-${contactoActualizado._id}`);
+        if (cardEl) {
+          cardEl.outerHTML = crearCardHTML(contactoActualizado, 'actualizado');
+        }
+      }
+    }
+
+    function eliminarContacto(contactoId) {
+      contactos = contactos.filter(c => c._id !== contactoId);
+
+      const cardEl = document.getElementById(`contacto-${contactoId}`);
+      if (cardEl) {
+        cardEl.style.opacity = '0';
+        cardEl.style.transform = 'translateX(-100%)';
+        setTimeout(() => {
+          cardEl.remove();
+          if (contactos.length === 0) {
+            containerEl.innerHTML = '<div class="empty-state">No hay contactos registrados</div>';
+          }
+        }, 300);
+      }
+    }
+
+    function agregarLog(tipo, mensaje) {
+      const tiempo = new Date().toLocaleTimeString();
+      const html = `<div class="evento ${tipo}">[${tiempo}] ${mensaje}</div>`;
+      logEl.insertAdjacentHTML('afterbegin', html);
+
+      while (logEl.children.length > 20) {
+        logEl.removeChild(logEl.lastChild);
+      }
+    }
+  </script>
+</body>
+</html>
